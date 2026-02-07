@@ -1,14 +1,103 @@
 {
   "name": "mct-website-generator",
   "version": "1.0.0",
-  "description": "MCT module for WEBSITE-GENERATOR",
-  "main": "dist/index.js",
+  "description": "MCP Server for generating and managing websites",
+  "main": "src/index.ts",
   "scripts": {
+    "start": "ts-node src/index.ts",
     "build": "tsc",
-    "dev": "tsx watch src/index.ts",
-    "test": "jest",
-    "setup": "npm install && npx drizzle-kit push:pg"
+    "dev": "nodemon src/index.ts",
+    "test": "jest"
   },
-  "keywords": ["mct", "api", "microservice"],
-  "license": "MIT"
+  "dependencies": {
+    "express": "^4.17.1",
+    "mongoose": "^5.9.10",
+    "cors": "^2.8.5",
+    "dotenv": "^8.2.0",
+    "ts-node": "^8.10.2",
+    "typescript": "^3.9.3",
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^14.0.1",
+    "@types/express": "^4.17.1",
+    "nodemon": "^2.0.4",
+    "jest": "^26.0.1"
+  }
+}
+### File: src/index.ts
+import express from 'express';
+import { connectDB } from './db/schema';
+import { setupRoutes } from './api/routes';
+import { setupMCP } from './mct/server';
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.use(express.json());
+connectDB();
+setupRoutes(app);
+setupMCP();
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+### File: src/api/routes.ts
+import { Express } from 'express';
+import { getWebsites, createWebsite, updateWebsite } from '../services/websiteService';
+export function setupRoutes(app: Express): void {
+  app.get('/websites', getWebsites);
+  app.post('/websites', createWebsite);
+  app.put('/websites/:id', updateWebsite);
+}
+### File: src/db/schema.ts
+import mongoose from 'mongoose';
+export const connectDB = async () => {
+  await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost/mct');
+};
+const WebsiteSchema = new mongoose.Schema({
+  name: String,
+  url: String,
+  content: String
+});
+export const Website = mongoose.model('Website', WebsiteSchema);
+### File: src/mct/server.ts
+import { McpServer, StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk';
+export function setupMCP() {
+  const server = new McpServer({
+    name: 'mct-website-generator',
+    version: '1.0.0'
+  });
+  server.start(new StreamableHTTPServerTransport({ port: 4000 }));
+}
+### File: src/mct/tools.ts
+import { McpServer } from '@modelcontextprotocol/sdk';
+import { generateWebsite } from '../services/websiteService';
+export function registerTools(server: McpServer) {
+  server.registerTool('generateWebsite', {
+    title: 'Generate Website',
+    description: 'Generates a new website with specified content',
+    inputSchema: { content: 'string' },
+    outputSchema: { websiteUrl: 'string' }
+  }, async ({ content }) => {
+    const websiteUrl = await generateWebsite(content);
+    return { websiteUrl };
+  });
+}
+### File: src/services/websiteService.ts
+import { Website } from '../db/schema';
+export async function getWebsites(req, res) {
+  const websites = await Website.find();
+  res.json(websites);
+}
+export async function createWebsite(req, res) {
+  const newWebsite = new Website(req.body);
+  await newWebsite.save();
+  res.status(201).json(newWebsite);
+}
+export async function updateWebsite(req, res) {
+  const updatedWebsite = await Website.findByIdAndUpdate(req.params.id, req.body, { new: true });
+  res.json(updatedWebsite);
+}
+export async function generateWebsite(content: string): Promise<string> {
+  const newWebsite = new Website({ content });
+  await newWebsite.save();
+  return `http://localhost:3000/websites/${newWebsite.id}`;
 }
